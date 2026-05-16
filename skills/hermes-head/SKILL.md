@@ -28,6 +28,9 @@ Use this skill when the user wants Hermes Agent to act as the planning / learnin
 - Hermes repo: `/Users/xbr/.local/src/hermes-agent`
 - CLI: `/Users/xbr/.local/bin/hermes`
 - Safe wrapper: `/Users/xbr/.local/bin/hermes-local`
+- Current upstream HEAD: `931caf2b2` from `NousResearch/hermes-agent` main, installed 2026-05-15.
+- `hermes version` still reports package version `v0.13.0 (2026.5.7)`, but update check reports `Up to date`.
+- Provider auth: Hermes has its own `openai-codex` OAuth credential in `~/.hermes/auth.json`; default model config is `gpt-5.5` via `openai-codex`.
 - Architecture note: `/Users/xbr/.openclaw/workspace/docs/openclaw-hermes-architecture-2026-05-15.md`
 
 ## Workflow
