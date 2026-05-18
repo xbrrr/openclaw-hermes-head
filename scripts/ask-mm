@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Reliable Bud -> Hermes advisory bridge.
+
+This helper is for internal Agentic Stack coordination when Telegram
+bot-to-bot wake is ambiguous or unreliable. It calls the local Hermes CLI,
+stores request/response artifacts, and prints a compact JSON summary.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ARTIFACT_ROOT = ROOT / "reliable-mm"
+DEFAULT_HERMES = Path("/Users/xbr/.local/bin/hermes-local")
+
+
+def _now() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _safe_id(value: str) -> str:
+    value = value.strip() or f"bud-mm-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "-", value)
+    return value.strip("-")[:120] or "bud-mm-request"
+
+
+def _write(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+
+
+def _json_default(value: Any) -> str:
+    return str(value)
+
+
+def run_request(args: argparse.Namespace) -> int:
+    correlation_id = _safe_id(args.correlation_id)
+    artifact_dir = ARTIFACT_ROOT / correlation_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.prompt_file:
+        prompt = Path(args.prompt_file).read_text(encoding="utf-8")
+    else:
+        prompt = args.prompt or ""
+
+    if not prompt.strip():
+        print("ERROR: prompt or --prompt-file is required", file=sys.stderr)
+        return 2
+
+    created_at = _now()
+    request_text = (
+        f"# Reliable MM Request\n\n"
+        f"- correlation_id: `{correlation_id}`\n"
+        f"- created_at: `{created_at}`\n"
+        f"- dry_run: `{bool(args.dry_run)}`\n\n"
+        f"## Prompt\n\n{prompt}\n"
+    )
+    _write(artifact_dir / "request.md", request_text)
+
+    hermes_cmd = [str(args.hermes_cmd)]
+    if args.skills:
+        hermes_cmd.extend(["--skills", args.skills])
+    hermes_cmd.extend(["-z", prompt])
+
+    meta: dict[str, Any] = {
+        "correlation_id": correlation_id,
+        "created_at": created_at,
+        "artifact_dir": str(artifact_dir),
+        "hermes_cmd": hermes_cmd[:-1] + ["<prompt>"],
+        "dry_run": bool(args.dry_run),
+        "timeout_seconds": args.timeout,
+    }
+    _write(artifact_dir / "meta.json", json.dumps(meta, ensure_ascii=False, indent=2, default=_json_default) + "\n")
+
+    if args.dry_run:
+        response = "[dry-run] Hermes was not invoked. Request artifact was written."
+        _write(artifact_dir / "response.md", response + "\n")
+        summary = {
+            "ok": True,
+            "status": "dry_run",
+            "correlation_id": correlation_id,
+            "artifact_dir": str(artifact_dir),
+            "response_preview": response,
+        }
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+
+    try:
+        proc = subprocess.run(
+            hermes_cmd,
+            cwd=str(ROOT),
+            text=True,
+            capture_output=True,
+            timeout=args.timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        _write(artifact_dir / "stderr.txt", str(exc) + "\n")
+        summary = {
+            "ok": False,
+            "status": "timeout",
+            "correlation_id": correlation_id,
+            "artifact_dir": str(artifact_dir),
+            "error": str(exc),
+        }
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 124
+
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
+    _write(artifact_dir / "response.md", stdout)
+    if stderr:
+        _write(artifact_dir / "stderr.txt", stderr)
+
+    meta.update({
+        "completed_at": _now(),
+        "returncode": proc.returncode,
+        "response_path": str(artifact_dir / "response.md"),
+        "stderr_path": str(artifact_dir / "stderr.txt") if stderr else None,
+    })
+    _write(artifact_dir / "meta.json", json.dumps(meta, ensure_ascii=False, indent=2, default=_json_default) + "\n")
+
+    summary = {
+        "ok": proc.returncode == 0,
+        "status": "completed" if proc.returncode == 0 else "failed",
+        "returncode": proc.returncode,
+        "correlation_id": correlation_id,
+        "artifact_dir": str(artifact_dir),
+        "response_preview": stdout.strip()[:500],
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return proc.returncode
+
+
+def self_test() -> int:
+    ns = argparse.Namespace(
+        correlation_id="self-test",
+        prompt="Self-test only. Do not call Hermes.",
+        prompt_file=None,
+        hermes_cmd=DEFAULT_HERMES,
+        skills="",
+        dry_run=True,
+        timeout=5,
+    )
+    return run_request(ns)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Reliable Bud -> Hermes advisory bridge")
+    parser.add_argument("--correlation-id", default="", help="Stable request id; becomes artifact directory name")
+    parser.add_argument("--prompt", default="", help="Prompt text to send to Hermes")
+    parser.add_argument("--prompt-file", default="", help="Read prompt from file")
+    parser.add_argument("--hermes-cmd", default=str(DEFAULT_HERMES), help="Hermes local CLI wrapper")
+    parser.add_argument("--skills", default="hermes-agent", help="Comma-separated Hermes skills to load; empty disables")
+    parser.add_argument("--timeout", type=int, default=600, help="Hermes CLI timeout in seconds")
+    parser.add_argument("--dry-run", action="store_true", help="Write artifacts without invoking Hermes")
+    parser.add_argument("--self-test", action="store_true", help="Run a no-network/no-LLM dry-run self-test")
+    args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
+    return run_request(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

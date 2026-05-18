@@ -1,0 +1,322 @@
+version: 1
+
+defaults:
+  tool_routing:
+    x_social_search:
+      rule: "Never use direct x.com browser/web scraping as the primary path because Cloudflare blocks automated access."
+      primary: "perplex_sonar_helper"
+      primary_command: "perplex <query> [quick|pro|reason|deep]"
+      primary_requirement: "must send search_sources=[social,web] through Perplexity chat/completions/Sonar helper"
+      exact_x_url_path: "bird_skill"
+      exact_x_url_order:
+        - "SocialData API"
+        - "Twitter/X cookies fallback"
+        - "browser only as last resort"
+      allowed_fallback: "OpenClaw web_search only after Perplex/Sonar helper failure, with explicit user-visible fallback note"
+      blocked_primary_paths:
+        - "direct x.com scrape"
+        - "browser automation against x.com search/timeline"
+        - "plain OpenClaw web_search when social coverage must be forced"
+
+  unspecified_topic_policy:
+    lane: "safe_default"
+    default_responder: "hermes_if_addressed_or_context_requires"
+    silent_agents:
+      - "bud_unless_directly_addressed"
+    routing_enforcement: "none"
+    inherit_topic_642_rules: false
+    audit: "passive_only"
+    notes: "Do not apply topic 642 Hermes/Bud coordination rules to other topics unless a topic policy is explicitly registered."
+
+chats:
+  - chat_id: "-1003772186616"
+    title: "Agentic Stack"
+    platform: "telegram"
+    topics:
+      - topic_id: "642"
+        topic: "MM"
+        scope: "topic_only"
+        enabled: true
+
+        agents:
+          hermes:
+            name: "Hermes / Master Mind"
+            username: "@ceo5000_bot"
+            role: "coordinator"
+            default_responder: true
+
+          bud:
+            name: "OpenClaw / Bud Askins"
+            username: "@iq5000_bot"
+            role: "executor"
+            default_responder: false
+
+        routing:
+          mode: "soft_enforced"  # documented_only | dry_run | soft_enforced | off
+          priority:
+            - explicit_mention
+            - reply_to_known_agent
+            - default_responder
+
+          mentions:
+            "@ceo5000_bot": "hermes"
+            "@iq5000_bot": "bud"
+
+          direct_mention_policy:
+            "@ceo5000_bot": "wake_hermes_even_when_replying_to_bud"
+            "@iq5000_bot": "wake_bud_for_direct_question_or_task"
+            note: "Explicit mention wins over reply context in MM/topic 642: @ceo5000_bot in a reply to Bud must wake Hermes; @iq5000_bot in a reply to Hermes must wake Bud. /task@iq5000_bot is required only for formal board/watchdog lifecycle tasks."
+
+          reply_to_agent_message: "same_agent_unless_explicit_mention_targets_another_agent"
+          default_agent: "hermes"
+          fallback_on_uncertain: "hermes"
+          fallback_on_error: "allow_default"
+
+        tool_routing:
+          x_social_search: "use defaults.tool_routing.x_social_search; Hermes/MM must route X/Twitter/social research to the perplex Sonar helper with social,web or to bird for exact X URLs, not to direct x.com scraping."
+
+        agent_queue:
+          enabled: true
+          path: "/Users/xbr/.agentic-stack/agent-queue.jsonl"
+          default_visibility: "public_allowed"
+
+        agent_agent:
+          visibility: "public_thread"
+          mode: "telegram_public_audit_with_local_reliable_fallback"
+          policy: "coordination messages between Hermes and Bud should be visible in this Telegram topic when useful, but Bud -> Hermes advisory/control requests must not depend on Telegram bot-to-bot wake"
+          protocol:
+            hermes_to_bud: "for formal lifecycle work use Telegram-supported bot-to-bot command addressing: /task@iq5000_bot correlation_id=<id> hops=<n> max_hops=2 ...; for quick direct questions, plain @iq5000_bot mention must still wake Bud in MM/topic 642"
+            bud_to_hermes: "for ACKs to Hermes public tasks, use plain text ACK correlation_id=<id> hops=<n> max_hops=2 ...; for Bud -> Hermes advisory/control requests, use reliable_mm local channel first or fallback to it automatically after missing Telegram ACK/answer"
+            private_queue: "audit/backup only; do not use it to hide agent-agent messages by default"
+          reliable_mm:
+            purpose: "Reliable local Bud -> Hermes advisory channel when Telegram bot-to-bot wake is ambiguous or unavailable."
+            command: "/Users/xbr/.agentic-stack/bin/ask-mm"
+            artifact_root: "/Users/xbr/.agentic-stack/reliable-mm"
+            hermes_wrapper: "/Users/xbr/.local/bin/hermes-local"
+            fallback_rule: "If a Bud -> Hermes public Telegram ping has no clear ACK/answer, Bud uses this local channel without waiting for Mikhail."
+          required_botfather_toggles:
+            - "Enable Bot-to-Bot Communication Mode for @ceo5000_bot"
+            - "Enable Bot-to-Bot Communication Mode for @iq5000_bot"
+            - "Disable Group Privacy Mode for @ceo5000_bot or make it admin/re-add as needed"
+          loop_guards:
+            max_hops: 2
+            per_pair_rate_limit: "1 message / 10 seconds during smoke tests"
+            require_correlation_id: true
+            dedupe_by_telegram_message_id: true
+            kill_switch_env: "AGENTIC_BOT_TO_BOT_DISABLED=1"
+
+        safety:
+          applies_only_when:
+            chat_id: "-1003772186616"
+            topic_id: "642"
+          no_destructive_actions_without_approval: true
+          public_reply_requires_explicit_permission: false
+
+      - topic_id: "723"
+        topic: "MM Only"
+        scope: "topic_only"
+        enabled: true
+        lane: "hermes_only"
+        agents:
+          hermes:
+            name: "Hermes / Master Mind"
+            username: "@ceo5000_bot"
+            role: "coordinator"
+            default_responder: true
+          bud:
+            name: "OpenClaw / Bud Askins"
+            username: "@iq5000_bot"
+            role: "silent_executor_available_via_642"
+            default_responder: false
+        routing:
+          mode: "documented_only"
+          default_agent: "hermes"
+          bud_policy: "silent_unless_explicit_correction_request"
+          delegation_policy: "Hermes may move executor work to topic 642 using logged send-message task path."
+        safety:
+          no_topic_642_rule_inheritance: true
+          no_agent_agent_coordination_here: true
+          no_destructive_actions_without_approval: true
+
+      - topic_id: "92"
+        topic: "Web Admin"
+        scope: "topic_only"
+        enabled: true
+        lane: "web_admin"
+        agents:
+          hermes:
+            name: "Hermes / Master Mind"
+            username: "@ceo5000_bot"
+            role: "coordinator"
+            default_responder: true
+          bud:
+            name: "OpenClaw / Bud Askins"
+            username: "@iq5000_bot"
+            role: "executor_when_directly_called"
+            default_responder: false
+        routing:
+          mode: "documented_only"
+          default_agent: "hermes_if_addressed_or_context_requires"
+          bud_policy: "respond_when_directly_called_or_reply_to_bud"
+          inherit_topic_642_rules: false
+        tool_routing:
+          x_social_search: "use defaults.tool_routing.x_social_search; for X/social tests do not use direct x.com browser/web scraping as primary."
+        safety:
+          no_topic_642_rule_inheritance: true
+          no_global_routing_changes: true
+
+      - topic_id: "259"
+        topic: "Perplex"
+        scope: "topic_only"
+        enabled: true
+        lane: "research"
+        routing:
+          mode: "documented_only"
+          default_agent: "hermes_if_addressed_or_context_requires"
+          bud_policy: "respond_when_directly_called_or_executor_work_needed"
+          inherit_topic_642_rules: false
+        tool_routing:
+          x_social_search: "use defaults.tool_routing.x_social_search; Perplex topic social/X work must prefer the Perplex Sonar helper with social,web and bird for exact X URLs."
+        safety:
+          no_topic_642_rule_inheritance: true
+          no_global_routing_changes: true
+
+      - topic_id: "1347"
+        topic: "Subconscious"
+        scope: "topic_only"
+        enabled: true
+        lane: "hermes_subconscious_development"
+        agents:
+          hermes:
+            name: "Hermes / Master Mind"
+            username: "@ceo5000_bot"
+            role: "owner"
+            default_responder: true
+          bud:
+            name: "OpenClaw / Bud Askins"
+            username: "@iq5000_bot"
+            role: "implementation_reviewer"
+            default_responder: false
+        routing:
+          mode: "documented_only"
+          default_agent: "hermes"
+          bud_policy: "respond_when_directly_called_or_formally_tasked"
+          delegation_policy: "Hermes coordinates subconscious roadmap; Bud implements/reviews local safe helpers and reports status in-topic when tasked."
+        memory:
+          local_store: "/Users/xbr/.agentic-stack/subconscious"
+          helper: "/Users/xbr/.agentic-stack/subconscious_memory.py"
+          layers:
+            - "working"
+            - "episodic"
+            - "semantic"
+            - "procedural"
+          reflection_job: "daily local cron, no external secrets"
+        safety:
+          no_external_provider_required: true
+          preserve_builtin_memory_session_search_skills: true
+          no_runtime_restart_without_separate_smoke_plan: true
+
+      - topic_id: "1346"
+        topic: "Server-doctor"
+        scope: "topic_only"
+        enabled: true
+        lane: "ops_runtime_diagnostics"
+        agents:
+          hermes:
+            name: "Hermes / Master Mind"
+            username: "@ceo5000_bot"
+            role: "coordinator"
+            default_responder: true
+          bud:
+            name: "OpenClaw / Bud Askins"
+            username: "@iq5000_bot"
+            role: "ops_executor"
+            default_responder: false
+        routing:
+          mode: "documented_only"
+          default_agent: "hermes_if_addressed_or_context_requires"
+          bud_policy: "respond_when_directly_called_or_formally_tasked"
+          delegation_policy: "Hermes triages and summarizes; Bud handles execution-heavy diagnostics, host commands, config edits, restarts, rollback/smoke checks, and incident repair."
+          inherit_topic_642_rules: false
+        skills:
+          primary:
+            - "server-doctor"
+          supporting:
+            - "systematic-debugging"
+            - "healthcheck"
+            - "migration-cutover-safety"
+            - "openclaw-update-safety"
+            - "telegram-bot-coding"
+        protocol:
+          flow: "baseline -> host/runtime/access map -> diagnostics -> classify down/degraded/partial/unstable -> safe action -> verification -> rollback/stop condition -> short report"
+          restart_rule: "Before restart/reset/cutover, verify fresh evidence, inspect logs, choose minimum action, and avoid repeated blind restarts."
+        safety:
+          no_topic_642_rule_inheritance: true
+          no_global_routing_changes: true
+          no_destructive_actions_without_approval: true
+          rollback_or_stop_condition_required: true
+
+      - topic_id: "4"
+        topic: "Analyst"
+        scope: "topic_only"
+        enabled: true
+        lane: "analytics_research"
+        agents:
+          hermes:
+            name: "Hermes / Master Mind"
+            username: "@ceo5000_bot"
+            role: "coordinator_analyst"
+            default_responder: true
+          bud:
+            name: "OpenClaw / Bud Askins"
+            username: "@iq5000_bot"
+            role: "data_report_executor"
+            default_responder: false
+        routing:
+          mode: "documented_only"
+          default_agent: "hermes_if_addressed_or_context_requires"
+          bud_policy: "respond_when_directly_called_or_executor_work_needed"
+          delegation_policy: "Hermes triages research/analytics questions and synthesizes; Bud handles data files, scripts, report generation, source checks, and batch workflows."
+          inherit_topic_642_rules: false
+        skills:
+          primary:
+            - "ai-research-analyst"
+            - "perplex"
+            - "deep"
+          supporting:
+            - "excel-financial-auditor"
+            - "product-abc-xyz"
+            - "yandex-metrica-finance-connector"
+        safety:
+          no_topic_642_rule_inheritance: true
+          no_global_routing_changes: true
+          no_external_side_effects_without_approval: true
+
+      - topic_id: "1"
+        topic: "Ignored / topic 1"
+        scope: "topic_only"
+        enabled: false
+        lane: "ignored"
+        routing:
+          mode: "off"
+          default_agent: "none"
+          hermes_policy: "do_not_respond"
+          bud_policy: "do_not_respond"
+          inherit_topic_642_rules: false
+        safety:
+          no_responses_from_hermes_or_bud: true
+          no_topic_642_rule_inheritance: true
+
+      - topic_id: "*"
+        topic: "Unspecified topics"
+        scope: "topic_default"
+        enabled: true
+        lane: "safe_default"
+        routing:
+          mode: "documented_only"
+          default_agent: "hermes_if_addressed_or_context_requires"
+          bud_policy: "silent_unless_directly_addressed"
+          inherit_topic_642_rules: false
+        safety:
+          no_global_routing_changes: true
+          no_topic_642_rule_inheritance: true
